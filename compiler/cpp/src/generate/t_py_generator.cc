@@ -1205,14 +1205,14 @@ void t_py_generator::generate_service_client(t_service* tservice) {
     generate_python_docstring(f_service_, (*f_iter));
     if (gen_twisted_) {
       indent(f_service_) << "self._seqid += 1" << endl;
-      if (!(*f_iter)->is_oneway()) {
-        indent(f_service_) <<
-          "d = self._reqs[self._seqid] = defer.Deferred()" << endl;
-      }
+      indent(f_service_) <<
+        "self._reqs[self._seqid] = defer.Deferred()" << endl;
+      indent(f_service_) <<
+        "d = defer.maybeDeferred(self.send_" << funname << ",";
+    } else {
+      indent(f_service_) <<
+        "self.send_" << funname << "(";
     }
-
-    indent(f_service_) <<
-      "self.send_" << funname << "(";
 
     bool first = true;
     for (fld_iter = fields.begin(); fld_iter != fields.end(); ++fld_iter) {
@@ -1225,25 +1225,53 @@ void t_py_generator::generate_service_client(t_service* tservice) {
     }
     f_service_ << ")" << endl;
 
-    if (!(*f_iter)->is_oneway()) {
-      f_service_ << indent();
-      if (gen_twisted_) {
-        f_service_ << "return d" << endl;
-      } else {
+    if (gen_twisted_) {
+      indent(f_service_) << "d.addCallbacks(self.cb_send_" << funname << "," << endl <<
+        indent() << indent() << "errback=self.eb_send_" << funname << "," << endl <<
+        indent() << indent() << "callbackArgs=(self._seqid,)," << endl <<
+        indent() << indent() << "errbackArgs=(self._seqid,))" << endl;
+      indent(f_service_) << "return d" << endl;
+    } else {
+      if (!(*f_iter)->is_oneway()) {
+        f_service_ << indent();
         if (!(*f_iter)->get_returntype()->is_void()) {
           f_service_ << "return ";
         }
         f_service_ <<
           "self.recv_" << funname << "()" << endl;
       }
-    } else {
-      if (gen_twisted_) {
-        f_service_ <<
-          indent() << "return defer.succeed(None)" << endl;
-      }
     }
+
     indent_down();
     f_service_ << endl;
+
+    if (gen_twisted_) {
+      indent(f_service_) <<
+        "def cb_send_" << funname << "(self, _, seqid):" << endl;
+      indent_up();
+      if ((*f_iter)->is_oneway()) {
+        f_service_ <<
+          indent() << "d = self._reqs.pop(seqid)" << endl <<
+          indent() << "d.callback(None)" << endl;
+      } else {
+        f_service_ <<
+          indent() << "d = self._reqs[seqid]" << endl;
+      }
+      f_service_ << indent() << "return d" << endl;
+      indent_down();
+
+      f_service_ << endl;
+
+      indent(f_service_) <<
+        "def eb_send_" << funname << "(self, e, seqid):" << endl;
+      indent_up();
+      f_service_ <<
+        indent() << "d = self._reqs.pop(seqid)" << endl <<
+        indent() << "d.errback(e)" << endl <<
+        indent() << "return d" << endl;
+      indent_down();
+      f_service_ << endl;
+    }
 
     indent(f_service_) <<
       "def send_" << function_signature(*f_iter) << ":" << endl;
@@ -1277,7 +1305,7 @@ void t_py_generator::generate_service_client(t_service* tservice) {
       f_service_ <<
         indent() << "args.write(oprot)" << endl <<
         indent() << "oprot.writeMessageEnd()" << endl <<
-        indent() << "oprot.trans.flush()" << endl;
+        indent() << "return oprot.trans.flush()" << endl;
     } else {
       f_service_ <<
         indent() << "args.write(self._oprot)" << endl <<
